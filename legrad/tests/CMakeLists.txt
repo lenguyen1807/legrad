@@ -11,6 +11,7 @@ FetchContent_MakeAvailable(Catch2)
 
 add_executable(${TEST_NAME}
     tensor/tensor_view.cpp
+    internal/array_view.cpp
     internal/view_pack.cpp
 )
 
