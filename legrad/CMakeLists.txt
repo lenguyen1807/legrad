@@ -44,10 +44,9 @@ option(LEGRAD_SANITIZE_THREAD "legrad: Enable Sanitize Thread" OFF)
 option(LEGRAD_SANITIZE_UNDEFINED "legrad: Enable Sanitize Undefined" OFF)
 
 # Backend specific
-option(LEGRAD_BLAS "legrad: Enable BLAS" OFF) # BLAS option should ON with other CPU option
+option(LEGRAD_BLAS "legrad: Enable BLAS" OFF) # BLAS option should be ON with other CPU option
 option(LEGRAD_CUDA "legrad: Enable CUDA" OFF)
-option(LEGRAD_METAL "legrad: Enable Metal" OFF) # Enable Metal by default
-
+option(LEGRAD_METAL "legrad: Enable Metal" OFF)
 # Tests and examples
 option(LEGRAD_BUILD_TESTS "legrad: Build tests" OFF)
 option(LEGRAD_BUILD_EXAMPLES "legrad: Build examples" OFF)
@@ -58,6 +57,7 @@ if (LEGRAD_OPENCV)
     if (NOT OpenCV_FOUND)
         message(FATAL_ERROR "OpenCV not found")
     endif()
+    message(STATUS "Use OpenCV")
     set(LEGRAD_EXTRA_LIBS ${LEGRAD_EXTRA_LIBS} ${OpenCV_LIBS})
 endif()
 
@@ -69,8 +69,10 @@ if (LEGRAD_FMT)
         GIT_TAG        e69e5f977d458f2650bb346dadf2ad30c5320281
     )
     FetchContent_MakeAvailable(fmt)
-    set(LEGRAD_EXTRA_LIBS ${LEGRAD_EXTRA_LIBS} fmt::fmt)
+
     add_compile_definitions(LEGRAD_USE_FMT)
+    message(STATUS "Use fmt")
+    set(LEGRAD_EXTRA_LIBS ${LEGRAD_EXTRA_LIBS} fmt::fmt)
 endif()
 
 # Use threads
