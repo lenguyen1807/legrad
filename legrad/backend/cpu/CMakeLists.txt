@@ -11,5 +11,4 @@ add_library(CPU_BACKEND
 
 target_include_directories(CPU_BACKEND PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/>
-    $<INSTALL_INTERFACE:include>
 )
