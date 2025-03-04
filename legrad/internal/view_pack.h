@@ -1,145 +1,130 @@
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
+#include <cstdlib>
+#include <stdexcept>
 
-#include "macros/expr.h"
+#include "internal/array_view.h"
 #include "macros/log.h"
 
 namespace legrad
 {
 using Size = size_t;
 using Int = int64_t;
-using IntIterator = Int*;
-using ConstIntIterator = const Int*;
-using IntList = std::initializer_list<Int>;
-template <size_t N>
-using IntArray = std::array<Int, N>;
 
 namespace internal
 {
-constexpr Int LEGRAD_MAX_PACK_VIEW_SIZE = 5;
+static constexpr Int LEGRAD_VIEW_PACK_MAX_DIM = 5;
 
 /*
- * view_pack is a class inspired by SizesAndStrides in Pytorch C10
- * Instead of using std::vector to store stride and shape
- * seperately, we can pack it in one array, the format is blow
- * [shape[0], ..., shape[4], stride[0], ..., stride[4]]
- * but for larger tensor with larger dimension (> 5)
- * then we can use out_range_storage (dynamically arrayor vector)
+ * view_pack is a class inspired (a lot) by PyTorch's `SizesAndStrides`.
+ * Memory Layout:
+ * - For tensors with dimension <= LEGRAD_VIEW_PACK_MAX_DIM (e.g., 5):
+ *   [shape[0], ..., shape[4], stride[0], ..., stride[4]] - Stored inline
+ * - For tensors with dimension > LEGRAD_VIEW_PACK_MAX_DIM:
+ *   Out-of-line storage (dynamically allocated array) is used to store
+ *   shape and stride data contiguously.
  */
 class view_pack
 {
 public:
-  view_pack()
-      : ndim_(1)
+  ~view_pack()
   {
-    unsafe_shape_at(0) = 0;
-    unsafe_stride_at(0) = 1;
+    if (!is_inline()) {
+      std::free(out_of_line_storage_);
+    }
+  }
+
+  view_pack()
+      : dim_(1)
+  {
+    inline_storage_.fill(0);
   }
 
   view_pack(Size size)
-      : ndim_(size)
+      : dim_(size)
   {
-    if (is_in_range()) {
-      in_range_storage_.fill(0);
+    if (is_inline()) {
+      inline_storage_.fill(0);
     } else {
-      out_of_range_storage_ = new Int[ndim_ * 2]{0};
+      out_of_line_storage_ = allocate_new_storage(dim_);
+      std::fill_n(out_of_line_storage_, dim_ * 2, 0);
     }
   }
 
-  view_pack(const IntList& shape)
-      : ndim_(shape.size())
+  view_pack(const view_pack&);
+  view_pack& operator=(const view_pack&);
+  view_pack(view_pack&&) noexcept;
+  view_pack& operator=(view_pack&&) noexcept;
+
+  IntArrayView shape_view() const noexcept { return {shape_data(), dim()}; }
+  IntArrayView stride_view() const noexcept { return {stride_data(), dim()}; }
+
+  const Int* shape_data() const noexcept
   {
-    set_shape(shape);
+    return is_inline() ? &inline_storage_[0] : &out_of_line_storage_[0];
   }
 
-  ~view_pack()
+  Int* shape_data() noexcept
   {
-    if (!is_in_range()) {
-      delete[] out_of_range_storage_;
-    }
+    return is_inline() ? &inline_storage_[0] : &out_of_line_storage_[0];
   }
 
-  IntIterator shape_data()
+  const Int* stride_data() const noexcept
   {
-    if (LEGRAD_LIKELY(is_in_range())) {
-      return &in_range_storage_[0];
-    } else {
-      return &out_of_range_storage_[0];
-    }
+    return is_inline() ? &inline_storage_[LEGRAD_VIEW_PACK_MAX_DIM]
+                       : &out_of_line_storage_[dim()];
   }
 
-  ConstIntIterator shape_data() const
+  Int* stride_data() noexcept
   {
-    if (LEGRAD_LIKELY(is_in_range())) {
-      return &in_range_storage_[0];
-    } else {
-      return &out_of_range_storage_[0];
-    }
+    return is_inline() ? &inline_storage_[LEGRAD_VIEW_PACK_MAX_DIM]
+                       : &out_of_line_storage_[dim()];
   }
 
-  IntIterator stride_data()
-  {
-    if (LEGRAD_LIKELY(is_in_range())) {
-      return &in_range_storage_[LEGRAD_MAX_PACK_VIEW_SIZE];
-    } else {
-      return &out_of_range_storage_[dim()];
-    }
-  }
-
-  ConstIntIterator stride_data() const
-  {
-    if (LEGRAD_LIKELY(is_in_range())) {
-      return &in_range_storage_[LEGRAD_MAX_PACK_VIEW_SIZE];
-    } else {
-      return &out_of_range_storage_[dim()];
-    }
-  }
+  Int* shape_begin() { return shape_data(); }
+  const Int* shape_begin() const { return shape_data(); }
+  Int* shape_end() { return shape_data() + dim(); }
+  const Int* shape_end() const { return shape_data() + dim(); }
+  Int* stride_begin() { return stride_data(); }
+  const Int* stride_begin() const { return stride_data(); }
+  Int* stride_end() { return stride_data() + dim(); }
+  const Int* stride_end() const { return stride_data() + dim(); }
 
   Int shape_at(Size idx) const
   {
-    LEGRAD_ASSERT(idx < ndim_, "Index {} is out of range [0:{}) for shape", idx,
-                  ndim_);
+    LEGRAD_ASSERT(idx < dim_, "Index {} is out of range [0:{}) for shape", idx,
+                  dim_);
     return unsafe_shape_at(idx);
   }
 
   Int stride_at(Size idx) const
   {
-    LEGRAD_ASSERT(idx < ndim_, "Index {} is out of range [0:{}) for stride",
-                  idx, ndim_);
+    LEGRAD_ASSERT(idx < dim_, "Index {} is out of range [0:{}) for stride", idx,
+                  dim_);
     return unsafe_stride_at(idx);
   }
 
-  IntIterator shape_begin() { return shape_data(); }
-  ConstIntIterator shape_begin() const { return shape_data(); }
-  IntIterator shape_end() { return shape_data() + dim(); }
-  ConstIntIterator shape_end() const { return shape_data() + dim(); }
-  IntIterator stride_begin() { return stride_data(); }
-  ConstIntIterator stride_begin() const { return stride_data(); }
-  IntIterator stride_end() { return stride_data() + dim(); }
-  ConstIntIterator stride_end() const { return stride_data() + dim(); }
-
-  Size dim() const { return ndim_; }
-
-  Size numel();
-
-  void set_shape(const IntList& shape)
+  void set_shape(IntArrayView shape)
   {
     resize_storage(shape.size());
     std::copy(shape.begin(), shape.end(), shape_begin());
   }
 
-  void set_stride(const IntList& stride)
+  void set_stride(IntArrayView stride)
   {
-    resize_storage(stride.size());
+    if (stride.size() != dim_) {
+      LEGRAD_THROW_ERROR(std::invalid_argument,
+                         "New stride is not match with current shape size", 0);
+    }
     std::copy(stride.begin(), stride.end(), stride_begin());
   }
 
-  void resize_storage(Size new_ndim);
+  void resize_storage(Size new_dim);
+  bool is_inline() const { return dim_ <= LEGRAD_VIEW_PACK_MAX_DIM; }
+  Size dim() const noexcept { return dim_; }
 
 private:
   Int& unsafe_stride_at(Size idx) { return stride_data()[idx]; }
@@ -147,18 +132,34 @@ private:
   Int unsafe_stride_at(Size idx) const { return stride_data()[idx]; }
   Int unsafe_shape_at(Size idx) const { return shape_data()[idx]; }
 
-  bool is_in_range() const { return ndim_ <= LEGRAD_MAX_PACK_VIEW_SIZE; }
+  void resize_out_of_line_storage(Size new_dim, Size old_dim);
+  void move_out_to_inline_storage(Size new_dim, Size old_dim);
+  void move_inline_to_out_storage(Size new_dim, Size old_dim);
 
-  void slower_resize(Size new_ndim, Size old_ndim);
+  Int* allocate_new_storage(Size n);
+  void reallocate_out_of_line_storage(Size n);
+  Int storage_bytes(Size n) noexcept { return n * 2 * sizeof(Int); }
+
+  void copy_inline_storage(const view_pack& other)
+  {
+    std::copy(other.inline_storage_.begin(), other.inline_storage_.end(),
+              inline_storage_.data());
+  }
+
+  void copy_outline_storage(const view_pack& other)
+  {
+    std::copy(other.out_of_line_storage_,
+              other.out_of_line_storage_ + other.dim() * 2,
+              out_of_line_storage_);
+  }
 
 private:
-  Int numel_ = -1;
-  Size ndim_;
+  Size dim_;
   union
   {
-    IntArray<LEGRAD_MAX_PACK_VIEW_SIZE * 2> in_range_storage_;
-    IntIterator out_of_range_storage_;
+    std::array<Int, LEGRAD_VIEW_PACK_MAX_DIM * 2> inline_storage_;
+    Int* out_of_line_storage_;
   };
 };
 }  // namespace internal
-};  // namespace legrad
+}  // namespace legrad

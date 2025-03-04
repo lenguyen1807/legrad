@@ -105,6 +105,7 @@ LEGRAD_INLINE void init_file_logging()
 
 #ifdef NDEBUG
 #define LEGRAD_ASSERT(cond, msg, ...) (void)(cond)
+#define LEGRAD_DEFAULT_ASSERT(cond) (void)(cond)
 #else
 #define LEGRAD_ASSERT(cond, msg, ...) \
   do { \
@@ -113,6 +114,14 @@ LEGRAD_INLINE void init_file_logging()
       assert(cond); \
     } \
   } while (false)
+#define LEGRAD_DEFAULT_ASSERT(cond) assert(cond);
 #endif
+
+#define LEGRAD_CHECK_AND_THROW(cond, throw_type, msg, ...) \
+  do { \
+    if (LEGRAD_UNLIKELY(!(cond))) { \
+      LEGRAD_THROW_ERROR(throw_type, msg, __VA_ARGS__); \
+    } \
+  } while (false)
 
 }  // namespace lndl::macros
