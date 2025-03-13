@@ -4,6 +4,7 @@
 
 #include "internal/array_view.h"
 #include "internal/view_pack.h"
+#include "util/helper_func.h"
 
 namespace legrad
 {
@@ -26,6 +27,9 @@ public:
    */
   IntArrayView stride() const { return view_.stride_view(); }
 
+  /**
+   * Return number of elements in Tensor
+   */
   Int numel()
   {
     if (numel_ == -1) {
@@ -35,16 +39,21 @@ public:
     return numel_;
   }
 
-  Int dim() { return view_.dim(); }
+  /**
+   * Return the rank (or dimension) of Tensor
+   */
+  Int dim() const { return view_.dim(); }
 
-  Int shape_at() const
+  Int shape_at(Size idx) const
   {
-    // TODO:
+    idx = util::maybe_wrap_dim(idx, dim());
+    return view_.shape_at(idx);
   }
 
-  Int stride_at() const
+  Int stride_at(Size idx) const
   {
-    // TODO:
+    idx = util::maybe_wrap_dim(idx, dim());
+    return view_.stride_at(idx);
   }
 
   /**
@@ -98,6 +107,11 @@ public:
    * element).
    */
   TensorView reshape(IntArrayView new_shape) const;
+
+private:
+  bool compute_contiguous_stride(IntArrayView shape,
+                                 IntArrayView stride,
+                                 Int offset);
 
 private:
   bool is_contiguous_;
